@@ -2,7 +2,6 @@ Segue o **texto completo da arquitetura**, em **versão objetiva, concisa e acad
 
 ---
 
-````markdown
 # Arquitetura do Projeto – Batalha Naval
 
 ## Visão Geral
@@ -75,7 +74,7 @@ batalha-naval-plp/
         │
         └───styles
                 main.css
-````
+```
 
 ---
 
