@@ -1,69 +1,36 @@
-import GameEngine from '../game/GameEngine.js';
-import CampaignManager from '../game/CampaingManager.js';
-import { randomUUID } from 'crypto';
-
 class GameService {
-    constructor() {
-        this.activeGames = new Map(); 
-        this.campaignManagers = new Map();
-    }
+  constructor(playerRepo) {
+    this.playerRepo = playerRepo;
+  }
 
-    createGame(mode = 'PVP', gameMode = 'classic', aiLevel = 1) {
-        const gameId = randomUUID();
+  finalizarPartida(loginVencedor, loginPerdedor) {
+    const vencedor = this.playerRepo.findByLogin(loginVencedor);
+    const perdedor = this.playerRepo.findByLogin(loginPerdedor);
 
-        const engine = new GameEngine({ mode, gameMode });
-        this.activeGames.set(gameId, engine);
+    if (!vencedor || !perdedor) return;
 
-        if (mode === 'IA') {
-            const humanPlayer = engine.players[0];
-            const campaign = new CampaignManager(humanPlayer, { mode, gameMode });
-            campaign.currentLevel = aiLevel - 1; 
-            campaign.startNextLevel(engine); 
-            
-            this.campaignManagers.set(gameId, campaign);
-        }
+    vencedor.estatisticas.partidas++;
+    vencedor.estatisticas.vitorias++;
 
-        return {
-            gameId,
-            gameState: engine.getPublicState()
-        };
-    }
+    perdedor.estatisticas.partidas++;
+    perdedor.estatisticas.derrotas++;
 
-    getGameState(gameId) {
-        const game = this.activeGames.get(gameId);
-        if (!game) throw new Error("Partida não encontrada!");
-        return game.getPublicState();
-    }
+    this._calcularTaxas(vencedor);
+    this._calcularTaxas(perdedor);
 
-    processAttack(gameId, row, col) {
-        const game = this.activeGames.get(gameId);
-        if (!game) throw new Error("Partida não encontrada!");
+    this.playerRepo.update(vencedor);
+    this.playerRepo.update(perdedor);
+  }
 
-        const humanResult = game.attack(row, col);
+  _calcularTaxas(player) {
+    const total = player.estatisticas.partidas;
 
-        let aiResult = null;
+    player.estatisticas.taxaVitoria =
+      total > 0 ? player.estatisticas.vitorias / total : 0;
 
-        // 2. Se for modo IA, o jogo não acabou e for a vez do PC, manda a IA jogar
-        if (game.mode === 'IA' && game.state === 'playing') {
-            const currentPlayer = game.getCurrentPlayer();
-            
-            if (currentPlayer.type === 'computer') {
-                const campaign = this.campaignManagers.get(gameId);
-                if (campaign) {
-                    // O CampaignManager já cuida de chamar a IA correta e executar o ataque no engine
-                    campaign.playComputerTurn(); 
-                    aiResult = "IA realizou sua jogada."; 
-                }
-            }
-        }
-
-        // Retorna o estado atualizado do tabuleiro para o Frontend desenhar
-        return {
-            humanAttack: humanResult,
-            aiAttackMsg: aiResult,
-            gameState: game.getPublicState()
-        };
-    }
+    player.estatisticas.taxaDerrota =
+      total > 0 ? player.estatisticas.derrotas / total : 0;
+  }
 }
 
-export default new GameService();
+module.exports = GameService;
