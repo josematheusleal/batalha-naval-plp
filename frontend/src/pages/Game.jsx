@@ -1,0 +1,217 @@
+import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import Header from '../components/Header';
+import Board from '../components/Board';
+import { mapBackendToFrontendBoard } from '../utils/BoardMapper';
+import './Game.css';
+
+export default function Game() {
+  const navigate = useNavigate();
+  const gameId = localStorage.getItem('currentGameId');
+  const loggedUser = JSON.parse(localStorage.getItem('loggedUser') || '{}');
+
+  const [gameState, setGameState] = useState(null);
+  const [playerBoard, setPlayerBoard] = useState(Array(100).fill('empty'));
+  const [opponentBoard, setOpponentBoard] = useState(Array(100).fill('empty'));
+  const [isMyTurn, setIsMyTurn] = useState(false);
+  
+  const [timeElapsed, setTimeElapsed] = useState(0);
+  const [selectedMoveShip, setSelectedMoveShip] = useState('');
+  const [campaignStage, setCampaignStage] = useState(() => {
+    return parseInt(localStorage.getItem('campaignStage')) || 1;
+  });
+
+  // 1. Cronômetro de Partida
+  useEffect(() => {
+    let interval;
+    if (gameState?.state === 'playing') {
+      interval = setInterval(() => setTimeElapsed(prev => prev + 1), 1000);
+    }
+    return () => clearInterval(interval);
+  }, [gameState?.state]);
+
+  const formatTime = (timeInSeconds) => {
+    const m = String(Math.floor(timeInSeconds / 60)).padStart(2, '0');
+    const s = String(timeInSeconds % 60).padStart(2, '0');
+    return `${m}:${s}`;
+  };
+
+  // 2. Polling do Backend
+  const fetchGameState = async () => {
+    if (!gameId) return;
+    try {
+      const res = await fetch(`http://localhost:3000/api/game/${gameId}`);
+      if (!res.ok) throw new Error("Erro ao buscar jogo");
+      const data = await res.json();
+      
+      setGameState(data);
+
+      const myData = data.players[0]; 
+      const oppData = data.players[1];
+
+      if (myData) setPlayerBoard(mapBackendToFrontendBoard(myData, false));
+      if (oppData) setOpponentBoard(mapBackendToFrontendBoard(oppData, true));
+
+      setIsMyTurn(data.currentPlayerId === myData?.id);
+
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  useEffect(() => {
+    fetchGameState(); 
+    const interval = setInterval(fetchGameState, 2000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // 3. Ações de Combate
+  const handlePlayerAttack = async (idx) => {
+    if (!isMyTurn || gameState?.state !== 'playing') return;
+    const row = Math.floor(idx / 10);
+    const col = idx % 10;
+
+    try {
+      await fetch(`http://localhost:3000/api/game/${gameId}/attack`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ row, col })
+      });
+      fetchGameState(); 
+    } catch (error) {
+      alert("Erro ao atacar!");
+    }
+  };
+
+  const handleMoveShip = async (direction) => {
+    if (!selectedMoveShip) {
+        alert("Selecione um navio para mover!");
+        return;
+    }
+    try {
+        const res = await fetch(`http://localhost:3000/api/game/${gameId}/move`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ shipId: selectedMoveShip, direction })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Movimento inválido");
+        fetchGameState();
+    } catch (error) {
+        alert(error.message);
+    }
+  };
+
+  const handleNextCampaignStage = () => {
+    localStorage.setItem('campaignStage', campaignStage + 1);
+    navigate('/placement/campanha'); 
+  };
+
+  const handleEndGame = () => {
+    localStorage.removeItem('currentGameId');
+    localStorage.setItem('campaignStage', 1); 
+    navigate('/home');
+  };
+
+  if (!gameState) return <div style={{textAlign: 'center', padding: '50px'}}>📡 Conectando com o Quartel General...</div>;
+
+  const myData = gameState.players[0];
+  const enemyData = gameState.players[1];
+  const didIWin = enemyData?.ships.every(s => s.sunk);
+  const gameStatus = gameState.state === 'game_over' ? (didIWin ? 'won' : 'lost') : 'playing';
+
+  return (
+    <div className="game-layout">
+      <Header />
+      <main className="game-content">
+        <div className="game-timer">
+          Tempo de Batalha: <span>{formatTime(timeElapsed)}</span>
+        </div>
+
+        <div className="boards-container">
+          <section className="board-section">
+            <div className="section-header">
+               <h1>Sua Frota {gameState.gameMode === 'campanha' && `- Fase ${campaignStage}`}</h1>
+            </div>
+            <Board isOpponent={false} cells={playerBoard} />
+            
+            {gameState.gameMode === 'dinamico' && (
+              <div className="drawn-card dynamic-panel" style={{marginTop: '20px'}}>
+                <h3>🌊 Mover Frota (1 por turno)</h3>
+                <div className="dynamic-controls">
+                  <select value={selectedMoveShip} onChange={(e) => setSelectedMoveShip(e.target.value)}>
+                    <option value="">Selecione um navio...</option>
+                    {myData?.ships.filter(s => !s.sunk).map(s => (
+                        <option key={s.id} value={s.id}>{s.type} ({s.size} casas)</option>
+                    ))}
+                  </select>
+                  <div className="dynamic-arrows">
+                    <button className="drawn-btn" disabled={myData?.hasMovedThisTurn || !isMyTurn} onClick={() => handleMoveShip('left')}>⬅️</button>
+                    <button className="drawn-btn" disabled={myData?.hasMovedThisTurn || !isMyTurn} onClick={() => handleMoveShip('up')}>⬆️</button>
+                    <button className="drawn-btn" disabled={myData?.hasMovedThisTurn || !isMyTurn} onClick={() => handleMoveShip('down')}>⬇️</button>
+                    <button className="drawn-btn" disabled={myData?.hasMovedThisTurn || !isMyTurn} onClick={() => handleMoveShip('right')}>➡️</button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </section>
+
+          <section className="board-section">
+            <div className="section-header">
+               <h1>Águas Inimigas</h1>
+            </div>
+            <Board isOpponent={true} cells={opponentBoard} onCellClick={handlePlayerAttack} />
+          </section>
+        </div>
+
+        <div className="turn-row">
+          <div className={`turn-indicator ${isMyTurn ? 'player-turn' : 'enemy-turn'}`}>
+            <h2>{isMyTurn ? "Sua vez, atire!" : "Vez do adversário"}</h2>
+          </div>
+        </div>
+      </main>
+
+      {gameStatus !== 'playing' && (
+        <div className="game-over-overlay">
+          {gameStatus === 'won' && gameState.gameMode === 'campanha' && campaignStage < 3 ? (
+            <div className="drawn-card game-over-modal modal-campaign">
+              <h1 className="modal-title text-blue">FASE {campaignStage} CONCLUÍDA!</h1>
+              <p className="game-over-desc">Prepare-se para reposicionar sua frota contra a próxima IA.</p>
+              <button className="drawn-btn yellow-btn game-over-btn" onClick={handleNextCampaignStage}>
+                ⚔️ Reposicionar Frota e Avançar
+              </button>
+            </div>
+          ) : (
+            <div className="drawn-card game-over-modal">
+              <h1 className={`modal-title ${gameStatus === 'won' ? 'text-blue' : 'text-red'}`}>
+                {gameStatus === 'won' ? 'VITÓRIA!' : 'DERROTA!'}
+              </h1>
+              <p className="game-over-desc">
+                {gameStatus === 'won' ? 'Você afundou todos os navios inimigos!' : 'Seus navios afundaram!'}
+              </p>
+              <div className="game-over-stats">
+                <span>⏱️ Duração: <strong>{formatTime(timeElapsed)}</strong></span>
+              </div>
+              <button className="drawn-btn white-btn game-over-btn" onClick={handleEndGame}>
+                Voltar ao Menu Principal
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* --- FOOTER DOS NAVIOS RESTAURADO --- */}
+      <footer className="game-footer">
+         <div className="cheatsheet">
+           <div className="cheatsheet-title">Navios</div>
+           <div className="fleet-list">
+             <div className="ship-item">Porta Aviões (2x) <div className="ship-blocks p6"></div></div>
+             <div className="ship-item">Navio de Guerra (2x) <div className="ship-blocks p4"></div></div>
+             <div className="ship-item">Encouraçado (1x) <div className="ship-blocks p3"></div></div>
+             <div className="ship-item">Submarino (1x) <div className="ship-blocks p1"></div></div>
+           </div>
+         </div>
+       </footer>
+    </div>
+  );
+}

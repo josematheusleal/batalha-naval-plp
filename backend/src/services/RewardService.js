@@ -12,7 +12,7 @@ export default class RewardService {
       if (this.acertosSeguidos[playerId] === 7) {
         this._concederPorId(playerId, 'Capitão');
       }
-
+      
       if (this.acertosSeguidos[playerId] === 8) {
         this._concederPorId(playerId, 'Capitão de Mar e Guerra');
       }
